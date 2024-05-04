@@ -3,7 +3,7 @@ const types = {
     title: "椰子云空间",
     author: "SLIGHTNING",
     icon: "icon-widget-cloud-table",
-	version: "1.0.0",
+	version: "0.0.0",
     isInvisibleWidget: true,
     isGlobalWidget: true,
     properties: [
@@ -296,7 +296,7 @@ const types = {
                         ]
                     }
                 ],
-                valueType: ["number", "string"],
+                valueType: "array",
                 blockOptions: { color: color.table }
             }, {
                 key: "tableTitleList",
