@@ -88,7 +88,24 @@ const types = {
                 ],
                 blockOptions: {
                     color: color.work,
-                    line: "作品",
+                    line: "作品"
+                }
+            }, {
+                key: "list",
+                label: "作品的",
+                params: [
+                    {
+                        key: "type",
+                        labelAfter: "列表",
+                        dropdown: [
+                            { label: "云字典", value: "dictionary" },
+                            { label: "云数据表", value: "table" }
+                        ]
+                    }
+                ],
+                valueType: "array",
+                blockOptions: {
+                    color: color.work,
                     space: 40
                 }
             }, {
@@ -122,6 +139,16 @@ const types = {
                 key: "dictionaryEmpty",
                 label: "清空",
                 params: [ param.dictionaryName ],
+                blockOptions: { color: color.dictionary }
+            }, {
+                key: "dictionaryWaitUpload",
+                label: "等待",
+                params: [
+                    {
+                        ...param.dictionaryName,
+                        labelAfter: "上传"
+                    }
+                ],
                 blockOptions: {
                     color: color.dictionary,
                     space: 40
@@ -237,12 +264,21 @@ const types = {
                 params: [
                     param.tableName, ...param.select
                 ],
-                valueType: ["number", "string"],
                 blockOptions: { color: color.table }
             }, {
                 key: "tableEmpty",
                 label: "清空",
                 params: [ param.tableName ],
+                blockOptions: { color: color.table }
+            }, {
+                key: "tableWaitUpload",
+                label: "等待",
+                params: [
+                    {
+                        ...param.tableName,
+                        labelAfter: "上传"
+                    }
+                ],
                 blockOptions: {
                     color: color.table,
                     space: 40
@@ -251,12 +287,29 @@ const types = {
                 key: "tableSelect",
                 label: "查询",
                 params: [
-                    param.tableName, ...param.select
+                    param.tableName, ...param.select, {
+                        key: "type",
+                        valueType: "string",
+                        dropdown: [
+                            { label: "字典", value: "dictionary" },
+                            { label: "列表", value: "list" }
+                        ]
+                    }
                 ],
                 valueType: ["number", "string"],
                 blockOptions: { color: color.table }
             }, {
-                key: "tableGet",
+                key: "tableTitleList",
+                params: [
+                    {
+                        ...param.tableName,
+                        labelAfter: "的标题列表"
+                    }
+                ],
+                valueType: "array",
+                blockOptions: { color: color.table }
+            }, {
+                key: "tableCount",
                 params: [
                     param.tableName, {
                         key: "type",
@@ -272,7 +325,19 @@ const types = {
             }
         ]
     })(),
-    events: []
+    events: [
+        {
+            key: "onError",
+            label: "出错",
+            params: [
+                {
+                    key: "message",
+                    label: "信息",
+                    valueType: "string"
+                }
+            ]
+        }
+    ]
 }
 
 var {methods, properties} = types
@@ -305,15 +370,21 @@ class Widget extends InvisibleWidget {
         this.asyncUpload = props.asyncUpload
         for (let method of methods) {
             let original = this[method.key]
-            this[method.key] = async function () {
-                var taskName = method.label || "获取"
+            if (original == null) {
+                original = function () {
+                    throw new Error("该功能暂未实现")
+                }
+            }
+            let getTaskName = function () {
+                var taskName = method.label || (method.valueType == "boolean" ? "判断" : "获取")
                 for (let i = 0; i < method.params.length; i++) {
                     let param = method.params[i]
                     if ("label" in param) {
                         taskName += param.label
                     }
                     if ("dropdown" in param) {
-                        taskName += ` ${param.dropdown.find(item => item.value == arguments[i]).label} `
+                        var item = param.dropdown.find(item => item.value == arguments[i])
+                        taskName += ` ${item == null ? arguments[i] : item.label} `
                     } else {
                         taskName += ` ${JSON.stringify(arguments[i])} `
                     }
@@ -321,13 +392,19 @@ class Widget extends InvisibleWidget {
                         taskName += param.labelAfter
                     }
                 }
+                return taskName
+            }
+            this[`_${method.key}`] = async function () {
+                var taskName = getTaskName.apply(this, arguments)
                 var argumentArray = Array.from(arguments)
                 argumentArray.unshift(taskName)
-                try {
-                    return await this.MainTask(taskName, original, ...argumentArray)
-                } catch (error) {
-                    this.error(error)
-                }
+                return await Task(taskName, original, ...argumentArray)
+            }
+            this[method.key] = async function () {
+                var taskName = getTaskName.apply(this, arguments)
+                var argumentArray = Array.from(arguments)
+                argumentArray.unshift(taskName)
+                return await this.MainTask(taskName, original, ...argumentArray)
             }
         }
     }
@@ -345,7 +422,9 @@ class Widget extends InvisibleWidget {
             var work = {
                 token: bcmc.apiToken,
                 dictionary: {},
-                table: {}
+                dictionaryList: [],
+                table: {},
+                tableList: []
             }
             this.work.token = work.token
             var tableLoadPromiseArray = []
@@ -378,15 +457,24 @@ class Widget extends InvisibleWidget {
                     let dictionary = {
                         ...DataManager,
                         id: widget.attributes.cloudDictId,
-                        name: widget.title
+                        widgetName: widget.title
                     }
-                    work.dictionary[dictionary.name] = dictionary
-                    work.dictionary[dictionary.id] = dictionary
+                    for (let index of ["widgetName", "id"]) {
+                        work.dictionary[dictionary[index]] = dictionary
+                    }
+                    work.dictionaryList.push(dictionary)
                 } else if (widget.type == "CLOUD_SPACE_TABLE_WIDGET") {
                     let table = {
                         ...DataManager,
                         id: widget.attributes.cloudTableId,
-                        widgetName: widget.title
+                        widgetName: widget.title,
+                        columnMap: {},
+                        getColumn(column) {
+                            if (!(column in this.columnMap)) {
+                                throw new Error(`该数据表不存在 ${column} 列`)
+                            }
+                            return this.columnMap[column]
+                        }
                     }
                     tableLoadPromiseArray.push((async () => {
                         try {
@@ -396,9 +484,17 @@ class Widget extends InvisibleWidget {
                                     url: `https://api-creation.codemao.cn/coconut/clouddb/v2/runtime/list?db_ids=${table.id}`,
                                     verify: `ids=[${table.id}]`
                                 })).data[0]
+                                table.columnNameList = tableInfo.columns.map(column => column.name)
                                 table.name = tableInfo.name
-                                work.table[table.widgetName] = table
-                                work.table[table.id] = table
+                                for (let column of tableInfo.columns) {
+                                    for (let index of ["name", "id"]) {
+                                        table.columnMap[column[index]] = column
+                                    }
+                                }
+                                for (let index of ["name", "id", "widgetName"]) {
+                                    work.table[table[index]] = table
+                                }
+                                work.tableList.push(table)
                             })
                         } catch (error) {
                             this.warn(error)
@@ -420,6 +516,27 @@ class Widget extends InvisibleWidget {
         }
     }
 
+    async list(taskName, type) {
+        await this.waitLoad()
+        switch (type) {
+            case "dictionary":
+                return Object.values(this.work.dictionaryList).map(dictionary => {
+                    return {
+                        "ID": dictionary.id,
+                        "对应控件名称": dictionary.widgetName
+                    }
+                })
+            case "table":
+                return Object.values(this.work.tableList).map(table => {
+                    return {
+                        "ID": table.id,
+                        "名称": table.name,
+                        "对应控件名称": table.widgetName
+                    }
+                })
+        }
+    }
+
     async getDictionary(name) {
         await this.waitLoad()
         var dictionary = this.work.dictionary[name]
@@ -433,8 +550,8 @@ class Widget extends InvisibleWidget {
         return dictionary
     }
 
-    async dictionarySet(taskName, name, key, value) {
-        var dictionary = await this.getDictionary(name)
+    async dictionarySet(taskName, dictionaryName, key, value) {
+        var dictionary = await this.getDictionary(dictionaryName)
         await dictionary.uploadTask(taskName, this.axiosWithToken, {
             method: "POST",
             url: `https://api-creation.codemao.cn/coconut/webdb/try/dict/${dictionary.id}/set`,
@@ -446,8 +563,8 @@ class Widget extends InvisibleWidget {
         })
     }
 
-    async dictionaryDelete(taskName, name, key) {
-        var dictionary = await this.getDictionary(name)
+    async dictionaryDelete(taskName, dictionaryName, key) {
+        var dictionary = await this.getDictionary(dictionaryName)
         await dictionary.uploadTask(taskName, this.axiosWithToken, {
             method: "DELETE",
             url: `https://api-creation.codemao.cn/coconut/webdb/try/dict/${dictionary.id}/remove?key=${key}`,
@@ -455,8 +572,8 @@ class Widget extends InvisibleWidget {
         })
     }
 
-    async dictionaryEmpty(taskName, name) {
-        var dictionary = await this.getDictionary(name)
+    async dictionaryEmpty(taskName, dictionaryName) {
+        var dictionary = await this.getDictionary(dictionaryName)
         await dictionary.uploadTask(taskName, this.axiosWithToken, {
             method: "DELETE",
             url: `https://api-creation.codemao.cn/coconut/webdb/try/dict/clear/${dictionary.id}`,
@@ -464,13 +581,18 @@ class Widget extends InvisibleWidget {
         })
     }
 
-    async dictionaryCopy(taskName, name) {
-        var dictionary = await this.getDictionary(name)
+    async dictionaryWaitUpload(taskName, dictionaryName) {
+        var dictionary = await this.getDictionary(dictionaryName)
         await dictionary.waitUpload()
-        var keyList = await this.dictionaryList(name, "key")
+    }
+
+    async dictionaryCopy(taskName, dictionaryName) {
+        var dictionary = await this.getDictionary(dictionaryName)
+        await dictionary.waitUpload()
+        var keyList = await this._dictionaryList(dictionaryName, "key")
         var copy = {}
         for (let key of keyList) {
-            copy[key] = this.dictionaryGet(name, key)
+            copy[key] = this._dictionaryGet(dictionaryName, key)
         }
         for (let key in copy) {
             copy[key] = await copy[key]
@@ -478,8 +600,8 @@ class Widget extends InvisibleWidget {
         return copy
     }
 
-    async dictionaryList(taskName, name, type) {
-        var dictionary = await this.getDictionary(name)
+    async dictionaryList(taskName, dictionaryName, type) {
+        var dictionary = await this.getDictionary(dictionaryName)
         await dictionary.waitUpload()
         switch (type) {
             case "key":
@@ -489,9 +611,9 @@ class Widget extends InvisibleWidget {
                     verify: `dictId=${dictionary.id}`
                 })).data
             case "value":
-                return Object.values(await this.dictionaryCopy(name))
+                return Object.values(await this._dictionaryCopy(dictionaryName))
             case "dictionary":
-                var dictionaryCopy = await this.dictionaryCopy(name)
+                var dictionaryCopy = await this._dictionaryCopy(dictionaryName)
                 var dictionaryList = []
                 for (let key of Object.keys(dictionaryCopy)) {
                     dictionaryList.push({
@@ -501,7 +623,7 @@ class Widget extends InvisibleWidget {
                 }
                 return dictionaryList
             case "list":
-                var dictionaryCopy = await this.dictionaryCopy(name)
+                var dictionaryCopy = await this._dictionaryCopy(dictionaryName)
                 var listList = []
                 for (let key of Object.keys(dictionaryCopy)) {
                     listList.push([key, dictionaryCopy[key]])
@@ -510,20 +632,20 @@ class Widget extends InvisibleWidget {
         }
     }
 
-    async dictionaryLength(taskName, name) {
-        var dictionary = await this.getDictionary(name)
+    async dictionaryLength(taskName, dictionaryName) {
+        var dictionary = await this.getDictionary(dictionaryName)
         await dictionary.waitUpload()
-        return (await this.dictionaryList(name, "key")).length
+        return (await this._dictionaryList(dictionaryName, "key")).length
     }
 
-    async dictionaryContain(taskName, name, type, value) {
-        var dictionary = await this.getDictionary(name)
+    async dictionaryContain(taskName, dictionaryName, type, value) {
+        var dictionary = await this.getDictionary(dictionaryName)
         await dictionary.waitUpload()
-        return (await this.dictionaryList(name, type)).includes(value)
+        return (await this._dictionaryList(dictionaryName, type)).includes(value)
     }
 
-    async dictionaryGet(taskName, name, key) {
-        var dictionary = await this.getDictionary(name)
+    async dictionaryGet(taskName, dictionaryName, key) {
+        var dictionary = await this.getDictionary(dictionaryName)
         await dictionary.waitUpload()
         var {data} = await this.axiosWithToken({
             method: "GET",
@@ -544,6 +666,133 @@ class Widget extends InvisibleWidget {
             }
         }
         return table
+    }
+
+    async tableUpdate(taskName, tableName, selectColumn, selectOperator, selectValue, column, value) {
+        var table = await this.getTable(tableName)
+        await table.uploadTask(taskName, this.axiosWithToken, {
+            method: "PUT",
+            url: `https://api-creation.codemao.cn/coconut/clouddb/runtime/${table.id}/update`,
+            data: {
+                querys: {
+                    querys: [{
+                        column_id: table.getColumn(selectColumn).id,
+                        op: selectOperator,
+                        value: selectValue
+                    }]
+                },
+                values: [{
+                    column_id: table.getColumn(column).id,
+                    value: value
+                }]
+            }
+        })
+    }
+
+    async tableAdd(taskName, line, tableName) {
+        var table = await this.getTable(tableName)
+        var values = line.split(",")
+        if (values.length > table.columnNameList.length) {
+            this.warn(`${taskName}：数据 ${JSON.stringify(line)} 数量 ${values.length} 超过云数据表 ${tableName} 列数 ${table.columnNameList.length}，溢出部分（${JSON.stringify(values.slice(table.columnNameList.length).join(","))}）将存储失败`)
+        }
+        await table.uploadTask(taskName, this.axiosWithToken, {
+            method: "POST",
+            url: `https://api-creation.codemao.cn/coconut/clouddb/runtime/${table.id}/insert`,
+            data: {
+                values: values
+            }
+        })
+    }
+
+    async tableDelete(taskName, tableName, selectColumn, selectOperator, selectValue) {
+        var table = await this.getTable(tableName)
+        await table.uploadTask(taskName, this.axiosWithToken, {
+            method: "PUT",
+            url: `https://api-creation.codemao.cn/coconut/clouddb/runtime/${table.id}/delete`,
+            data: {
+                querys: {
+                    querys: [{
+                        column_id: table.getColumn(selectColumn).id,
+                        op: selectOperator,
+                        value: selectValue
+                    }]
+                }
+            }
+        })
+    }
+
+    async tableEmpty(taskName, tableName) {
+        var table = await this.getTable(tableName)
+        await table.uploadTask(taskName, this.axiosWithToken, {
+            method: "PUT",
+            url: `https://api-creation.codemao.cn/coconut/clouddb/v2/runtime/${table.id}/clear`,
+            verify: `id=${table.id}`,
+            data: {}
+        })
+    }
+
+    async tableWaitUpload(taskName, tableName) {
+        var table = await this.getTable(tableName)
+        await table.waitUpload()
+    }
+
+    async tableSelect(taskName, tableName, selectColumn, selectOperator, selectValue, type) {
+        var table = await this.getTable(tableName)
+        await table.waitUpload()
+        var {data} = await this.axiosWithToken({
+            method: "POST",
+            url: `https://api-creation.codemao.cn/coconut/clouddb/runtime/${table.id}/select`,
+            data: {
+                querys: {
+                    querys: [{
+                        column_id: table.getColumn(selectColumn).id,
+                        op: selectOperator,
+                        value: selectValue
+                    }]
+                }
+            }
+        })
+        var recordArray = data.records
+        switch (type) {
+            case "dictionary":
+                return recordArray.map(record => {
+                    var dictionary = {}
+                    var {values} = record
+                    for (let id of Object.keys(values)) {
+                        dictionary[table.getColumn(id).name] = values[id]
+                    }
+                    return dictionary
+                })
+            case "list":
+                return recordArray.map(record => {
+                    var list = []
+                    var {values} = record
+                    for (let name of table.columnNameList) {
+                        list.push(values[table.getColumn(name).id])
+                    }
+                    return list
+                })
+        }
+    }
+
+    async tableTitleList(taskName, tableName) {
+        var table = await this.getTable(tableName)
+        return table.columnNameList
+    }
+
+    async tableCount(taskName, tableName, type) {
+        var table = await this.getTable(tableName)
+        switch (type) {
+            case "row":
+                await table.waitUpload()
+                return (await this.axiosWithToken({
+                    method: "GET",
+                    url: `https://api-creation.codemao.cn/coconut/clouddb/runtime/${table.id}/count?type=RECORD`,
+                    verify: `id=${table.id}&type=RECORD`
+                })).data
+            case "column":
+                return table.columnNameList.length
+        }
     }
 
     async getTimestamp() {
@@ -646,11 +895,13 @@ class Widget extends InvisibleWidget {
             message = message.message
         }
         this.widgetWarn(message)
+        this.emit("onError", message)
     }
 
     error(error) {
         console.error(error)
         this.widgetError(error.message)
+        this.emit("onError", error.message)
     }
 }
 
