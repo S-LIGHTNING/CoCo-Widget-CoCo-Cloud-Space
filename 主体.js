@@ -398,7 +398,7 @@ class Widget extends InvisibleWidget {
                 var taskName = getTaskName.apply(this, arguments)
                 var argumentArray = Array.from(arguments)
                 argumentArray.unshift(taskName)
-                return await Task(taskName, original, ...argumentArray)
+                return await Task(taskName, () => original.apply(this, argumentArray))
             }
             this[method.key] = async function () {
                 var taskName = getTaskName.apply(this, arguments)
