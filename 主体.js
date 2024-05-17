@@ -357,6 +357,11 @@ for (let requirment of requirmentArray) {
 }
 
 var timeDifference
+var noticeForUse =
+`重要提示：访问和使用椰子云空间，即表示您同意在下文的条款与条件。如果您不同意这些条款或条件，请不要访问或使用椰子云空间。
+本控件可以访问和修改 CoCo 已发布作品所关联的源码云空间中的云字典和云数据表（以下简称“源码云数据”）。在使用椰子云空间之前，被许可方应确保适用的许可协议未禁止访问和修改源码云数据（适用法律明确允许被许可方的情况除外），或者被许可方已从版权所有者处获得访问和修改源码云数据的许可。
+是否使用椰子云空间完全由您决定。许可方既不鼓励也不纵容使用椰子云空间，并对被许可方违反适用法律使用椰子云空间不承担任何责任。`
+var bugReporter
 
 class Widget extends InvisibleWidget {
 
@@ -405,6 +410,11 @@ class Widget extends InvisibleWidget {
     }
 
     load(taskName, workID, channel) {
+        if (noticeForUse != null) {
+            console.warn(noticeForUse)
+            this.widgetWarn(noticeForUse)
+            noticeForUse = null
+        }
         this.work = this.MainTask(taskName, async () => {
             var {data} = await this.Task("获取作品数据", this.axios, {
                 method: "GET",
