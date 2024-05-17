@@ -351,17 +351,12 @@ var {methods, properties} = types
     }
 })
 
-var timeDifference
-
-async function Task(name, func) {
-    var argumentArray = Array.from(arguments).slice(2)
-    try {
-        return await func.apply(this, argumentArray)
-    } catch (error) {
-        error.message = `${name} 失败：${error.message}`
-        throw error
-    }
+const requirmentArray = ["axios", "crypto-js"]
+for (let requirment of requirmentArray) {
+    require(requirment)
 }
+
+var timeDifference
 
 class Widget extends InvisibleWidget {
 
@@ -398,7 +393,7 @@ class Widget extends InvisibleWidget {
                 var taskName = getTaskName.apply(this, arguments)
                 var argumentArray = Array.from(arguments)
                 argumentArray.unshift(taskName)
-                return await Task(taskName, () => original.apply(this, argumentArray))
+                return await this.Task(taskName, original, ...argumentArray)
             }
             this[method.key] = async function () {
                 var taskName = getTaskName.apply(this, arguments)
@@ -411,11 +406,11 @@ class Widget extends InvisibleWidget {
 
     load(taskName, workID, channel) {
         this.work = this.MainTask(taskName, async () => {
-            var {data} = await Task("获取作品数据", this.axios, {
+            var {data} = await this.Task("获取作品数据", this.axios, {
                 method: "GET",
                 url: `https://api-creation.codemao.cn/coconut/web/work/${workID}/load?channel=${channel}`
             })
-            var bcmc = await Task("加载作品发布文件", this.axios, {
+            var bcmc = await this.Task("加载作品发布文件", this.axios, {
                 method: "GET",
                 url: data.bcmc_url
             })
@@ -478,7 +473,7 @@ class Widget extends InvisibleWidget {
                     }
                     tableLoadPromiseArray.push((async () => {
                         try {
-                            await Task(`加载云数据表控件 ${table.widgetName} 的源数据表（ID：${table.id}）`, async () => {
+                            await this.Task(`加载云数据表控件 ${table.widgetName} 的源数据表（ID：${table.id}）`, async () => {
                                 var tableInfo = (await this.axiosWithToken({
                                     method: "GET",
                                     url: `https://api-creation.codemao.cn/coconut/clouddb/v2/runtime/list?db_ids=${table.id}`,
@@ -817,48 +812,32 @@ class Widget extends InvisibleWidget {
         return Math.round(new Date().getTime() / 1000) + timeDifference
     }
 
-    async MainTask(name, func) {
-        try {
-            var result = await Task.apply(this, arguments)
-            return result
-        } catch (error) {
-            this.error(error)
-        }
-    }
-
-    async ImportantTask(name, func) {
-        try {
-            var result = await Task.apply(this, arguments)
-            return result
-        } catch (error) {
-            this.warn(error)
-        }
-    }
-
     async axiosWithToken(argument) {
         var {url, method, headers={}, data, verify} = argument
-        const CryptoJS = require("crypto-js")
-        var timestamp = await this.getTimestamp()
-        if (verify == null) {
-            verify = method == "GET" ? url.split("?")[1] : JSON.stringify(data)
-        }
-        var sign = CryptoJS.SHA256("pBlYqXbJDu" + timestamp + verify)
-        sign = sign.toString(CryptoJS.enc.Hex).toLocaleUpperCase()
-        headers = {
-            ...headers,
-            env: 1,
-            Sign: sign,
-            "X-Coconut-Authorization": this.work.token,
-            Timestamp: timestamp
-        }
+        await this.Task(`${method.toUpperCase()} ${url} ：添加校验信息`, async () => {
+            const CryptoJS = this.require("crypto-js")
+            var timestamp = await this.getTimestamp()
+            if (verify == null) {
+                verify = method == "GET" ? url.split("?")[1] : JSON.stringify(data)
+            }
+            var sign = CryptoJS.SHA256("pBlYqXbJDu" + timestamp + verify)
+            sign = sign.toString(CryptoJS.enc.Hex).toLocaleUpperCase()
+            headers = {
+                ...headers,
+                env: 1,
+                Sign: sign,
+                "X-Coconut-Authorization": this.work.token,
+                Timestamp: timestamp
+            }
+        })
         return await this.axios({url, method, headers, data})
     }
 
     async axios(argument) {
-        const axios = require("axios")
         var {url, method} = argument
+        const axios = await this.Task(`${method.toUpperCase()} ${url} ：获取 Axios 依赖`, () => this.require("axios"))
         try {
-            return await Task(`${method.toUpperCase()} ${url} `, async () => {
+            return await this.Task(`${method.toUpperCase()} ${url} `, async () => {
                 try {
                     const response = await axios(argument)
                     const { data } = response
@@ -882,6 +861,42 @@ class Widget extends InvisibleWidget {
             })
         } catch (error) {
             throw new Error(error.message)
+        }
+    }
+
+    require(name) {
+        var module = require(name)
+        if (module == null) {
+            throw new Error(`缺少 ${name} 依赖`)
+        }
+        return require(name)
+    }
+
+    async Task(name, func) {
+        var argumentArray = Array.from(arguments).slice(2)
+        try {
+            return await func.apply(this, argumentArray)
+        } catch (error) {
+            error.message = `${name} 失败：${error.message}`
+            throw error
+        }
+    }
+
+    async MainTask(name, func) {
+        try {
+            var result = await this.Task.apply(this, arguments)
+            return result
+        } catch (error) {
+            this.error(error)
+        }
+    }
+
+    async ImportantTask(name, func) {
+        try {
+            var result = await this.Task.apply(this, arguments)
+            return result
+        } catch (error) {
+            this.warn(error)
         }
     }
 
