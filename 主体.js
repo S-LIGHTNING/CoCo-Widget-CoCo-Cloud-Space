@@ -12,6 +12,11 @@ const types = {
             label: "异步上传",
             valueType: "boolean",
             defaultValue: false
+        }, {
+            key: "autoReportError",
+            label: "自动上报错误",
+            valueType: "boolean",
+            defaultValue: true
         }
     ],
     methods: (function () {
@@ -363,11 +368,23 @@ var noticeForUse =
 是否使用椰子云空间完全由您决定。许可方既不鼓励也不纵容使用椰子云空间，并对被许可方违反适用法律使用椰子云空间不承担任何责任。`
 var bugReporter
 
+function loadBugReporter() {
+    bugReporter = new Widget({
+        asyncUpload: true,
+        autoReportError: false
+    })
+    for (let method of ["Log", "Warn", "Error"]) {
+        bugReporter[`widget${method}`] = function (message) {}
+    }
+    bugReporter.load(223766326, "0")
+}
+
 class Widget extends InvisibleWidget {
 
     constructor(props) {
         super(props)
         this.asyncUpload = props.asyncUpload
+        this.autoReportError = props.autoReportError
         for (let method of methods) {
             let original = this[method.key]
             if (original == null) {
@@ -411,11 +428,13 @@ class Widget extends InvisibleWidget {
 
     load(taskName, workID, channel) {
         if (noticeForUse != null) {
-            console.warn(noticeForUse)
-            this.widgetWarn(noticeForUse)
+            this.warn(noticeForUse)
             noticeForUse = null
         }
         this.work = this.MainTask(taskName, async () => {
+            await new Promise(resolve => setTimeout(resolve, 0))
+            this.work.ID = workID
+            this.work.channel = channel
             var {data} = await this.Task("获取作品数据", this.axios, {
                 method: "GET",
                 url: `https://api-creation.codemao.cn/coconut/web/work/${workID}/load?channel=${channel}`
@@ -425,6 +444,8 @@ class Widget extends InvisibleWidget {
                 url: data.bcmc_url
             })
             var work = {
+                ID: workID,
+                channel: channel,
                 token: bcmc.apiToken,
                 dictionary: {},
                 dictionaryList: [],
@@ -916,6 +937,7 @@ class Widget extends InvisibleWidget {
 
     warn(message) {
         if (message instanceof Error) {
+            this.reportBug(error)
             console.warn(message)
             message = message.message
         }
@@ -924,9 +946,25 @@ class Widget extends InvisibleWidget {
     }
 
     error(error) {
+        this.reportBug(error)
         console.error(error)
         this.widgetError(error.message)
         this.emit("onError", error.message)
+    }
+
+    reportBug(bug) {
+        if (!this.autoReportError) {
+            return
+        }
+        if (bugReporter == null) {
+            loadBugReporter()
+        }
+        var date = new Date().toLocaleString()
+        var version = types.version
+        var stack = bug.stack.match(/(?<=^[\s]*)[^\s].*?(?=$| \()/gm).join("\\n")
+        var work = `${this.work.ID}（${{"0": "H5", "1": "社区"}[this.work.channel]} 通道）`
+        var message = `${date},${version},${work},${stack}`
+        bugReporter.tableAdd(message, "错误报告")
     }
 }
 
